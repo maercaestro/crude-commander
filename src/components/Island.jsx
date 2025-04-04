@@ -22,7 +22,10 @@ const Island = ({ src, name, position, size, data }) => {
           top: `${position.y}%`,
           width: `${size}px`, 
           imageRendering: 'pixelated',
-          zIndex: showPopup ? 20 : 10
+          boxSizing: 'border-box',
+          zIndex: showPopup ? 20 : 10,
+          transform: 'translate(0, 30%)',
+          transformOrigin: 'left center'
         }}
         onMouseEnter={() => setShowPopup(true)}
         onMouseLeave={() => setShowPopup(false)}

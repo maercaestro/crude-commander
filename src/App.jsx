@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import logo from './assets/logo-cc.png'
 import island1 from './assets/island1.svg'
 import island2 from './assets/island2.svg'
@@ -9,6 +9,7 @@ import mediumcc from './assets/mediumcc.svg'
 import Island from './components/Island'
 import OilTerminal from './components/OilTerminal'
 import Ship from './components/Ship'
+import TimeEngine from './timeEngine';
 import { 
   MapIcon, 
   BriefcaseIcon, 
@@ -40,6 +41,43 @@ const navItems = [
   { name: 'End Turn', key: 'end' },
 ];
 
+// First, add shipMovement utility
+const calculateShipMovement = (ship, terminals, islands, speed = 2) => {
+  if (!ship.data?.destination) return ship;
+  
+  // Check both terminals and islands for destination
+  const destinationTerminal = terminals.find(t => t.name === ship.data.destination);
+  const destinationIsland = islands.find(i => i.name === ship.data.destination);
+  const destination = destinationTerminal || destinationIsland;
+  
+  if (!destination) return ship;
+
+  // Calculate position relative to the left side of the destination
+  const dx = (destination.position.x) - ship.position.x; // Removed center offset
+  const dy = destination.position.y - ship.position.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  if (distance < speed) {
+    return {
+      ...ship,
+      position: { 
+        x: destination.position.x,
+        y: destination.position.y
+      }
+    };
+  }
+
+  const newX = ship.position.x + (dx / distance) * speed;
+  const newY = ship.position.y + (dy / distance) * speed;
+  const newRotation = (Math.atan2(dy, dx) * 180 / Math.PI + 90) % 360;
+
+  return {
+    ...ship,
+    position: { x: newX, y: newY },
+    rotation: newRotation
+  };
+};
+
 function App() {
   const [activeTab, setActiveTab] = useState('map')
   const [isNavOpen, setIsNavOpen] = useState(true)
@@ -48,13 +86,14 @@ function App() {
   const [dragMode, setDragMode] = useState(false)
   const [position, setPosition] = useState({ x: 0, y: 0 })
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
+  const [currentDay, setCurrentDay] = useState(1);
   const containerRef = useRef(null)
 
   const islands = [
     {
       src: island1,
       name: 'Calnera East',
-      position: { x: 10, y: 35 },
+      position: { x: 10, y: 30 },
       size: 200,
       data: {
         refineries: 2,
@@ -65,7 +104,7 @@ function App() {
     {
       src: island2,
       name: 'Calnera Capital',
-      position: { x: 90, y: 30 },
+      position: { x: 90, y: 0 },
       size: 700,
       data: {
         refineries: 3,
@@ -76,7 +115,7 @@ function App() {
     {
       src: island3,
       name: 'Calnera South',
-      position: { x: 50, y: 90 },
+      position: { x: 60, y: 70 },
       size: 500,
       data: {
         refineries: 1,
@@ -149,7 +188,7 @@ function App() {
     }
   ]
 
-  const ships = [
+  const [ships, setShips] = useState([
     // VLCCs
     {
       src: vlcc,
@@ -172,7 +211,7 @@ function App() {
       data: {
         currentInventory: '800,000 bbl',
         availableCapacity: '1,200,000 bbl',
-        destination: 'Deep Sea Terminal'
+        destination: 'Calnera Capital'
       }
     },
     // Medium tankers
@@ -181,30 +220,50 @@ function App() {
       name: 'MT Seabridge',
       position: { x: 15, y: 45 },
       size: 30,
-      rotation: 70  // Heading east
+      rotation: 70,
+      data: {
+        currentInventory: '0 bbl',
+        availableCapacity: '500,000 bbl',
+        destination: 'Calnera East Terminal 1'
+      }  // Heading east
     },
     {
       src: mediumcc,
       name: 'MT Starcruise',
       position: { x: 40, y: 60 },
       size: 30,
-      rotation: 180  // Heading south
+      rotation: 180,
+      data: {
+        currentInventory: '20,000 bbl',
+        availableCapacity: '500,000 bbl',
+        destination: 'Calnera South'
+      } // Heading south
     },
     {
       src: mediumcc,
       name: 'MT Voyager',
       position: { x: 70, y: 55 },
       size: 30,
-      rotation: 225  // Heading southwest
+      rotation: 225,
+      data: {
+        currentInventory: '400,000 bbl',
+        availableCapacity: '500,000 bbl',
+        destination: 'Calnera South Terminal'
+      }  // Heading southwest
     },
     {
       src: mediumcc,
       name: 'MT Navigator',
       position: { x: 55, y: 35 },
       size: 30,
-      rotation: 0  // Heading north
+      rotation: 0,
+      data: {
+        currentInventory: '10,000 bbl',
+        availableCapacity: '500,000 bbl',
+        destination: 'Calnera East Terminal 3'
+      }  // Heading north
     }
-  ]
+  ]);
 
   const handleZoomIn = () => {
     setZoom(prev => Math.min(prev + 0.1, 2))
@@ -235,8 +294,42 @@ function App() {
     setIsDragging(false)
   }
 
+  // Initialize engine
+  const engine = useRef(new TimeEngine());
+
+  // Advance time function
+  const advanceTime = () => {
+    const { newMonth, futureMonth } = engine.current.advanceMonth();
+    
+    // Update ship positions
+    const updatedShips = engine.current.updateShipPositions(ships, terminals);
+    setShips(updatedShips);
+  };
+
+  // Update the navItems click handler
+  const handleNavClick = (key) => {
+    if (key === 'end') {
+      // Handle End Turn
+      const updatedShips = ships.map(ship => 
+        calculateShipMovement(ship, terminals, islands)
+      );
+      setShips(updatedShips);
+      // Increment day counter
+      setCurrentDay(prev => prev + 1);
+    } else {
+      setActiveTab(key);
+    }
+  };
+
   return (
     <div className="w-screen h-screen bg-sky-500 flex font-['Orbitron']">
+      {/* Add day counter display near the top of the screen */}
+      <div className="fixed top-4 right-1/2 transform translate-x-1/2 z-50 
+                      bg-gray-800/80 text-white px-4 py-2 rounded-lg 
+                      backdrop-blur-sm font-bold">
+        Day: {currentDay}
+      </div>
+
       {/* Toggle Button - Always visible */}
       <button 
         onClick={() => setIsNavOpen(!isNavOpen)}
@@ -264,7 +357,7 @@ function App() {
           return (
             <button
               key={item.key}
-              onClick={() => setActiveTab(item.key)}
+              onClick={() => handleNavClick(item.key)}
               className={`
                 flex items-center gap-3 px-4 py-3 rounded
                 ${activeTab === item.key 
@@ -309,6 +402,12 @@ function App() {
             className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors duration-200"
           >
             <MagnifyingGlassMinusIcon className="w-6 h-6 text-gray-700" />
+          </button>
+          <button
+            onClick={advanceTime}
+            className="p-2 rounded-full bg-gray-200 hover:bg-gray-300 transition-colors duration-200"
+          >
+            Advance Month
           </button>
         </div>
 
