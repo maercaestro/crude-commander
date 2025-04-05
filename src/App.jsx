@@ -9,7 +9,10 @@ import mediumcc from './assets/mediumcc.svg'
 import Island from './components/Island'
 import OilTerminal from './components/OilTerminal'
 import Ship from './components/Ship'
+import DockingStation from './components/DockingStation'
+import BufferZone from './components/BufferZone'
 import TimeEngine from './timeEngine';
+import { checkCollision } from './utils/collisionDetection';
 import { 
   MapIcon, 
   BriefcaseIcon, 
@@ -41,40 +44,115 @@ const navItems = [
   { name: 'End Turn', key: 'end' },
 ];
 
+// Add docking points configuration
+const dockingPoints = [
+
+  {
+    position: { x: 88, y: 50 },
+    isVisible: true,
+    name: 'Calnera Capital Port'
+  },
+  {
+    position: { x: 15, y: 32 },
+    isVisible: true,
+    name: 'Calnera East Port'
+  },
+  {
+    position: { x: 48, y: 80 },
+    isVisible: true,
+    name: 'Calnera South Port'
+  },
+
+  // Add more docking points as needed
+];
+
 // First, add shipMovement utility
 const calculateShipMovement = (ship, terminals, islands, speed = 2) => {
-  if (!ship.data?.destination) return ship;
+  if (!ship.data?.destination) {
+    console.log(`Ship ${ship.name}: No destination set`);
+    return ship;
+  }
   
-  // Check both terminals and islands for destination
+  const DOCK_BUFFER = 3;
+  const AVOIDANCE_DISTANCE = 15;
+  const AVOIDANCE_FORCE = 10;
+
+  const getNextPosition = (start, end, speed) => {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    
+    if (distance < speed) {
+      console.log(`Ship ${ship.name} reached destination`);
+      return end;
+    }
+
+    // Calculate base movement
+    let newX = start.x + (dx / distance) * speed;
+    let newY = start.y + (dy / distance) * speed;
+
+    // Check for buffer zone collisions and adjust course
+    islands.forEach(island => {
+      // Use buffer zone size instead of island size
+      const bufferZoneRadius = island.size * 0.75 * 0.5; // Match the buffer zone size
+      const obstacleX = island.position.x;
+      const obstacleY = island.position.y + 10; // Account for buffer zone offset
+
+      // Calculate distance to buffer zone
+      const obstDx = newX - obstacleX;
+      const obstDy = newY - obstacleY;
+      const obstDistance = Math.sqrt(obstDx * obstDx + obstDy * obstDy);
+
+      // If we're inside or too close to buffer zone, adjust course
+      if (obstDistance < bufferZoneRadius + AVOIDANCE_DISTANCE) {
+        console.log(`${ship.name}: Avoiding buffer zone of ${island.name}`);
+        
+        // Calculate avoidance vector
+        const avoidX = -obstDy / obstDistance;
+        const avoidY = obstDx / obstDistance;
+
+        // Apply stronger avoidance force for buffer zones
+        const avoidanceForce = (1 - (obstDistance / (bufferZoneRadius + AVOIDANCE_DISTANCE))) * AVOIDANCE_FORCE;
+        newX += avoidX * avoidanceForce;
+        newY += avoidY * avoidanceForce;
+      }
+    });
+
+    return { x: newX, y: newY };
+  };
+
+  // Rest of the function remains the same
   const destinationTerminal = terminals.find(t => t.name === ship.data.destination);
   const destinationIsland = islands.find(i => i.name === ship.data.destination);
-  const destination = destinationTerminal || destinationIsland;
   
-  if (!destination) return ship;
-
-  // Calculate position relative to the left side of the destination
-  const dx = (destination.position.x) - ship.position.x; // Removed center offset
-  const dy = destination.position.y - ship.position.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  
-  if (distance < speed) {
-    return {
-      ...ship,
-      position: { 
-        x: destination.position.x,
-        y: destination.position.y
-      }
-    };
+  if (destinationIsland) {
+    const dockingPoint = dockingPoints.find(d => d.name.includes(destinationIsland.name));
+    if (dockingPoint) {
+      const nextPos = getNextPosition(ship.position, dockingPoint.position, speed);
+      
+      return {
+        ...ship,
+        position: nextPos,
+        rotation: (Math.atan2(
+          dockingPoint.position.y - ship.position.y,
+          dockingPoint.position.x - ship.position.x
+        ) * 180 / Math.PI + 90) % 360
+      };
+    }
   }
 
-  const newX = ship.position.x + (dx / distance) * speed;
-  const newY = ship.position.y + (dy / distance) * speed;
-  const newRotation = (Math.atan2(dy, dx) * 180 / Math.PI + 90) % 360;
-
+  const destination = destinationTerminal || destinationIsland;
+  if (!destination) return ship;
+  
+  const nextPos = getNextPosition(ship.position, destination.position, speed);
+  
   return {
     ...ship,
-    position: { x: newX, y: newY },
-    rotation: newRotation
+    position: nextPos,
+    rotation: (Math.atan2(
+      destination.position.y - ship.position.y,
+      destination.position.x - ship.position.x
+    ) * 180 / Math.PI + 90) % 360
   };
 };
 
@@ -428,6 +506,25 @@ function App() {
               transition: isDragging ? 'none' : 'transform 0.3s ease-in-out'
             }}
           >
+            {/* Add buffer zones first */}
+            {islands.map((island, index) => (
+              <BufferZone
+                key={`buffer-${index}`}
+                position={island.position}
+                size={island.size * 0.75}
+                isVisible={true}
+                offset={{ x: 0, y: 10 }} // Adjust these values to move the buffer zone
+              />
+            ))}
+            
+            {/* Add docking points */}
+            {dockingPoints.map((point, index) => (
+              <DockingStation
+                key={`dock-${index}`}
+                {...point}
+              />
+            ))}
+            
             {islands.map((island, index) => (
               <Island
                 key={`island-${index}`}
@@ -444,6 +541,12 @@ function App() {
               <Ship
                 key={`ship-${index}`}
                 {...ship}
+              />
+            ))}
+            {dockingPoints.map((dockingPoint, index) => (
+              <DockingStation
+                key={`docking-${index}`}
+                {...dockingPoint}
               />
             ))}
           </div>
